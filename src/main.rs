@@ -2,8 +2,8 @@ use clap::Parser;
 use thiserror::Error;
 
 use std::result;
-use std::net::IpAddr;
-use std::net::Ipv4Addr;
+use std::str::FromStr;
+use std::net::{Ipv6Addr, Ipv4Addr, IpAddr, SocketAddr};
 
 use tokio::io;
 use tokio::net::{TcpStream, TcpListener};
@@ -37,6 +37,9 @@ async fn main() -> io::Result<()> {
     }
 }
 
+const IPV4_TYPE: u8 = 0x01;
+const IPV6_TYPE: u8 = 0x04;
+const DOMAIN_TYPE: u8 = 0x03;
 const CONNECT_CMD: u8 = 0x01;
 const SOCKS_VERSION: u8 = 0x05;
 
@@ -132,6 +135,38 @@ async fn handle(stream: &mut TcpStream) -> Result<()> {
     if buf[1] != CONNECT_CMD {
         return Err(Error::Command(CommandError::UnsupportedCommand));
     }
+
+    let dest = match buf[3] {
+        IPV4_TYPE => {
+            let mut octets = [0u8; 4];
+            stream.read_exact(&mut octets).await?;
+            let port = stream.read_u16().await?;
+
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::from(octets)), port)
+        }
+        DOMAIN_TYPE => {
+            let len = stream.read_u8().await?;
+
+            let mut buf = vec![0u8; len as usize];
+            stream.read_exact(&mut buf).await?;
+
+            let domain = String::from_utf8(buf)
+                .map_err(|_| Error::Command(CommandError::ServerFailure))?;
+                
+            let port = stream.read_u16().await?;
+
+            SocketAddr::from_str(&format!("{}:{}", domain, port))
+                .map_err(|_| Error::Command(CommandError::HostUnreachable))?
+        }
+        IPV6_TYPE => {
+            let mut octets = [0u8; 16];
+            stream.read_exact(&mut octets).await?;
+            let port = stream.read_u16().await?;
+
+            SocketAddr::new(IpAddr::V6(Ipv6Addr::from(octets)), port)
+        }
+        _ => return Err(Error::Command(CommandError::UnsupportedAddr)),
+    };
 
     Ok(())
 }
