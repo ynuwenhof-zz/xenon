@@ -41,6 +41,7 @@ const IPV4_TYPE: u8 = 0x01;
 const IPV6_TYPE: u8 = 0x04;
 const DOMAIN_TYPE: u8 = 0x03;
 const CONNECT_CMD: u8 = 0x01;
+const SUCCESS_REPLY: u8 = 0x00;
 const SOCKS_VERSION: u8 = 0x05;
 
 type Result<T> = result::Result<T, Error>;
@@ -168,5 +169,19 @@ async fn handle(stream: &mut TcpStream) -> Result<()> {
         _ => return Err(Error::Command(CommandError::UnsupportedAddr)),
     };
 
+    let mut peer = TcpStream::connect(dest).await
+        .map_err(|_| Error::Command(CommandError::HostUnreachable))?;
+
+    let buf = [
+        SOCKS_VERSION,
+        SUCCESS_REPLY,
+        0, 1,
+        0, 0, 0, 0,
+        0, 0
+    ];
+
+    stream.write(&buf).await?;
+
+    io::copy_bidirectional(stream, &mut peer).await?;
     Ok(())
 }
