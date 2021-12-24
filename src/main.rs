@@ -32,7 +32,20 @@ async fn main() -> io::Result<()> {
         tokio::spawn(async move {
             let mut stream = stream;
 
-            handle(&mut stream).await
+            let res = handle(&mut stream).await;
+            if let Err(Error::Command(err)) = res {
+                let buf = [
+                    SOCKS_VERSION,
+                    err as u8,
+                    0, 1,
+                    0, 0, 0, 0,
+                    0, 0
+                ];
+
+                stream.write(&buf).await?;
+            };
+
+            stream.shutdown().await
         });
     }
 }
