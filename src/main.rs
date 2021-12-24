@@ -37,6 +37,7 @@ async fn main() -> io::Result<()> {
     }
 }
 
+const CONNECT_CMD: u8 = 0x01;
 const SOCKS_VERSION: u8 = 0x05;
 
 type Result<T> = result::Result<T, Error>;
@@ -51,6 +52,28 @@ enum Error {
     InvalidCredentials,
     #[error("{0}")]
     Io(#[from] io::Error),
+    #[error("{0}")]
+    Command(#[from] CommandError),
+}
+
+#[derive(Error, Debug)]
+enum CommandError {
+    #[error("general socks server failure")]
+    ServerFailure = 0x01,
+    #[error("connection not allowed by ruleset")]
+    DisallowedConnection,
+    #[error("network unreachable")]
+    NetworkUnreachable,
+    #[error("host unreachable")]
+    HostUnreachable,
+    #[error("connection refused")]
+    ConnectionRefused,
+    #[error("ttl expired")]
+    TtlExpired,
+    #[error("command not supported")]
+    UnsupportedCommand,
+    #[error("address type not supported")]
+    UnsupportedAddr,
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -81,6 +104,7 @@ async fn handle(stream: &mut TcpStream) -> Result<()> {
     let mut buf = vec![0u8; buf[1] as usize];
     stream.read_exact(&mut buf).await?;
 
+    // TODO: Accept user/pass authentication
     let method = Method::from(*buf
         .iter()
         .find(|&&m| {
@@ -94,6 +118,19 @@ async fn handle(stream: &mut TcpStream) -> Result<()> {
 
     if method == Method::NoAcceptable {
         return Err(Error::NoAcceptableMethod);
+    }
+
+    // TODO: Handle user/pass authentication
+
+    let mut buf = [0u8; 4];
+    stream.read_exact(&mut buf).await?;
+
+    if buf[0] != SOCKS_VERSION {
+        return Err(Error::InvalidVersion(SOCKS_VERSION, buf[0]));
+    }
+
+    if buf[1] != CONNECT_CMD {
+        return Err(Error::Command(CommandError::UnsupportedCommand));
     }
 
     Ok(())
