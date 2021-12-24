@@ -1,4 +1,5 @@
 use clap::Parser;
+use thiserror::Error;
 
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
@@ -8,7 +9,7 @@ use tokio::net::TcpListener;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about)]
-pub struct Opts {
+struct Opts {
     /// Set listener address
     #[clap(short, long, default_value_t = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)))]
     addr: IpAddr,
@@ -28,4 +29,16 @@ async fn main() -> io::Result<()> {
 
         // TODO: Handle connection
     }
+}
+
+#[derive(Error, Debug)]
+enum Error {
+    #[error("invalid version, expected {0} found {1}")]
+    InvalidVersion(u8, u8),
+    #[error("no acceptable method found")]
+    NoMethod,
+    #[error("invalid credentials")]
+    InvalidCredentials,
+    #[error("{0}")]
+    Io(#[from] io::Error),
 }
