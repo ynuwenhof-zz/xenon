@@ -7,6 +7,7 @@ use std::net::Ipv4Addr;
 
 use tokio::io;
 use tokio::net::{TcpStream, TcpListener};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about)]
@@ -36,6 +37,8 @@ async fn main() -> io::Result<()> {
     }
 }
 
+const SOCKS_VERSION: u8 = 0x05;
+
 type Result<T> = result::Result<T, Error>;
 
 #[derive(Error, Debug)]
@@ -43,13 +46,55 @@ enum Error {
     #[error("invalid version, expected {0} found {1}")]
     InvalidVersion(u8, u8),
     #[error("no acceptable method found")]
-    NoMethod,
+    NoAcceptableMethod,
     #[error("invalid credentials")]
     InvalidCredentials,
     #[error("{0}")]
     Io(#[from] io::Error),
 }
 
-async fn handle(_stream: &mut TcpStream) -> Result<()> {
+#[derive(Copy, Clone, PartialEq)]
+enum Method {
+    NoAuth,
+    Auth = 0x02,
+    NoAcceptable = 0xFF, 
+}
+
+impl From<u8> for Method {
+    fn from(val: u8) -> Self {
+        match val {
+            0x00 => Self::NoAuth,
+            0x02 => Self::Auth,
+            _ => Self::NoAcceptable,
+        }
+    }
+}
+
+async fn handle(stream: &mut TcpStream) -> Result<()> {
+    let mut buf = [0u8; 2];
+    stream.read_exact(&mut buf).await?;
+
+    if buf[0] != SOCKS_VERSION {
+        return Err(Error::InvalidVersion(SOCKS_VERSION, buf[0]));
+    }
+
+    let mut buf = vec![0u8; buf[1] as usize];
+    stream.read_exact(&mut buf).await?;
+
+    let method = Method::from(*buf
+        .iter()
+        .find(|&&m| {
+            m == Method::NoAuth as u8
+        })
+        .unwrap_or(&(Method::NoAcceptable as u8))
+    );
+
+    let buf = [SOCKS_VERSION, method as u8];
+    stream.write(&buf).await?;
+
+    if method == Method::NoAcceptable {
+        return Err(Error::NoAcceptableMethod);
+    }
+
     Ok(())
 }
