@@ -8,6 +8,7 @@ readme = "README.md"
 license = "MIT"
 
 [dependencies]
+thiserror = "1.0.30"
 
 [dependencies.clap]
 version = "3.0.0-beta.5"
