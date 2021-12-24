@@ -1,11 +1,12 @@
 use clap::Parser;
 use thiserror::Error;
 
+use std::result;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 
 use tokio::io;
-use tokio::net::TcpListener;
+use tokio::net::{TcpStream, TcpListener};
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about)]
@@ -25,11 +26,17 @@ async fn main() -> io::Result<()> {
     let listener = TcpListener::bind((opts.addr, opts.port)).await?;
 
     loop {
-        let (_stream, _addr) = listener.accept().await?;
+        let (stream, _addr) = listener.accept().await?;
 
-        // TODO: Handle connection
+        tokio::spawn(async move {
+            let mut stream = stream;
+
+            handle(&mut stream).await
+        });
     }
 }
+
+type Result<T> = result::Result<T, Error>;
 
 #[derive(Error, Debug)]
 enum Error {
@@ -41,4 +48,8 @@ enum Error {
     InvalidCredentials,
     #[error("{0}")]
     Io(#[from] io::Error),
+}
+
+async fn handle(_stream: &mut TcpStream) -> Result<()> {
+    Ok(())
 }
