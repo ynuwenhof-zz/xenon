@@ -1,6 +1,6 @@
 # xenon
 
-A simple [Socks5](https://datatracker.ietf.org/doc/html/rfc1928) server written in Rust.
+A simple **[Socks5](https://datatracker.ietf.org/doc/html/rfc1928)** server written in Rust.
 
 ## Features
 
