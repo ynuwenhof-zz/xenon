@@ -1,13 +1,17 @@
 use clap::Parser;
 use thiserror::Error;
+use serde::Deserialize;
 
-use std::result;
-use std::str::FromStr;
-use std::net::{Ipv6Addr, Ipv4Addr, IpAddr, SocketAddr};
-
-use tokio::io;
+use tokio::{io, fs};
 use tokio::net::{TcpStream, TcpListener};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+use std::result;
+use std::sync::Arc;
+use std::str::FromStr;
+use std::path::PathBuf;
+use std::string::FromUtf8Error;
+use std::net::{IpAddr, Ipv6Addr, Ipv4Addr, SocketAddr};
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about)]
@@ -18,21 +22,40 @@ struct Opts {
     /// Set listener port
     #[clap(short, long, default_value_t = 1080)]
     port: u16,
+    /// Set users path
+    #[clap(short, long, value_name = "PATH")]
+    users: Option<PathBuf>,
+}
+
+#[derive(Deserialize)]
+struct User {
+    username: String,
+    password: String,
 }
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
     let opts = Opts::parse();
 
+    let mut users: Option<Vec<User>> = Option::default();
+
+    if let Some(path) = opts.users {
+        let content = fs::read_to_string(path).await?;
+        users = serde_json::from_str(&content)?;
+    }
+
+    let users = Arc::new(users);
+
     let listener = TcpListener::bind((opts.addr, opts.port)).await?;
 
     loop {
         let (stream, _addr) = listener.accept().await?;
+        let users = users.clone();
 
         tokio::spawn(async move {
             let mut stream = stream;
 
-            let res = handle(&mut stream).await;
+            let res = handle(&mut stream, users).await;
             if let Err(Error::Command(err)) = res {
                 let buf = [
                     SOCKS_VERSION,
@@ -54,6 +77,7 @@ const IPV4_TYPE: u8 = 0x01;
 const IPV6_TYPE: u8 = 0x04;
 const DOMAIN_TYPE: u8 = 0x03;
 const CONNECT_CMD: u8 = 0x01;
+const AUTH_VERSION: u8 = 0x01;
 const SUCCESS_REPLY: u8 = 0x00;
 const SOCKS_VERSION: u8 = 0x05;
 
@@ -70,9 +94,12 @@ enum Error {
     #[error("{0}")]
     Io(#[from] io::Error),
     #[error("{0}")]
+    Utf(#[from] FromUtf8Error),
+    #[error("{0}")]
     Command(#[from] CommandError),
 }
 
+#[allow(dead_code)]
 #[derive(Error, Debug)]
 enum CommandError {
     #[error("general socks server failure")]
@@ -110,7 +137,7 @@ impl From<u8> for Method {
     }
 }
 
-async fn handle(stream: &mut TcpStream) -> Result<()> {
+async fn handle(stream: &mut TcpStream, users: Arc<Option<Vec<User>>>) -> Result<()> {
     let mut buf = [0u8; 2];
     stream.read_exact(&mut buf).await?;
 
@@ -121,11 +148,11 @@ async fn handle(stream: &mut TcpStream) -> Result<()> {
     let mut buf = vec![0u8; buf[1] as usize];
     stream.read_exact(&mut buf).await?;
 
-    // TODO: Accept user/pass authentication
     let method = Method::from(*buf
         .iter()
         .find(|&&m| {
-            m == Method::NoAuth as u8
+            m == Method::NoAuth as u8 && users.is_none() ||
+            m == Method::Auth as u8 && users.is_some()
         })
         .unwrap_or(&(Method::NoAcceptable as u8))
     );
@@ -137,7 +164,39 @@ async fn handle(stream: &mut TcpStream) -> Result<()> {
         return Err(Error::NoAcceptableMethod);
     }
 
-    // TODO: Handle user/pass authentication
+    if method == Method::Auth {
+        let mut buf = [0u8; 2];
+        stream.read_exact(&mut buf).await?;
+
+        if buf[0] != AUTH_VERSION {
+            return Err(Error::InvalidVersion(AUTH_VERSION, buf[0]));
+        }
+
+        let mut buf = vec![0u8; buf[1] as usize];
+        stream.read_exact(&mut buf).await?;
+        let username = String::from_utf8(buf)?;
+
+        let len = stream.read_u8().await?;
+        let mut buf = vec![0u8; len as usize];
+        stream.read_exact(&mut buf).await?;
+        let password = String::from_utf8(buf)?;
+
+        if let Some(ref users) = *users {
+            let exists = users
+                .iter()
+                .any(|u|
+                    u.username == username &&
+                    u.password == password
+                );
+
+            let buf = [AUTH_VERSION, !exists as u8];
+            stream.write(&buf).await?;
+
+            if !exists {
+                return Err(Error::InvalidCredentials);
+            }
+        }
+    }
 
     let mut buf = [0u8; 4];
     stream.read_exact(&mut buf).await?;
