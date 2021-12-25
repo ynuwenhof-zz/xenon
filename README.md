@@ -9,12 +9,13 @@ A simple **[Socks5](https://datatracker.ietf.org/doc/html/rfc1928)** server writ
 - [x] **No authentication**.
 - [ ] **[Gssapi](https://datatracker.ietf.org/doc/html/rfc1961) authentication**.
 - [x] **[Username and Password](https://datatracker.ietf.org/doc/html/rfc1929) authentication**.
+  - [ ] Improve security.
 
 ### Commands
 
-- [x] **Connect**
-- [ ] **Bind**
-- [ ] **Udp associate**
+- [x] **Connect**.
+- [ ] **Bind**.
+- [ ] **Udp associate**.
 
 ## Usage
 
