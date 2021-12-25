@@ -1,3 +1,4 @@
+use log::Level;
 use clap::Parser;
 use thiserror::Error;
 use serde::Deserialize;
@@ -22,6 +23,9 @@ struct Opts {
     /// Set listener port
     #[clap(short, long, default_value_t = 1080)]
     port: u16,
+    /// Set verbosity
+    #[clap(short, long, parse(from_occurrences))]
+    verbose: usize,
     /// Set users path
     #[clap(short, long, value_name = "PATH")]
     users: Option<PathBuf>,
@@ -37,20 +41,37 @@ struct User {
 async fn main() -> io::Result<()> {
     let opts = Opts::parse();
 
+    let level = match opts.verbose {
+        1 => Level::Error,
+        2 => Level::Warn,
+        3 => Level::Info,
+        4 => Level::Debug,
+        5 => Level::Trace,
+        _ => Level::Info,
+    };
+
+    simple_logger::init_with_level(level)
+        .expect("failed to init logger");
+
     let mut users: Option<Vec<User>> = Option::default();
 
     if let Some(path) = opts.users {
         let content = fs::read_to_string(path).await?;
-        users = serde_json::from_str(&content)?;
+        users = Some(serde_json::from_str(&content)?);
+
+        log::info!("loaded users");
     }
 
     let users = Arc::new(users);
-
     let listener = TcpListener::bind((opts.addr, opts.port)).await?;
 
+    log::info!("listening for incoming connections on {}:{}", opts.addr, opts.port);
+
     loop {
-        let (stream, _addr) = listener.accept().await?;
+        let (stream, addr) = listener.accept().await?;
         let users = users.clone();
+
+        log::info!("new connection from {}", addr);
 
         tokio::spawn(async move {
             let mut stream = stream;
