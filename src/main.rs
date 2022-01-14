@@ -1,18 +1,18 @@
-use log::Level;
 use clap::Parser;
-use thiserror::Error;
+use log::Level;
 use serde::Deserialize;
+use thiserror::Error;
 
-use tokio::{io, fs};
-use tokio::net::{TcpStream, TcpListener};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::{fs, io};
 
-use std::result;
-use std::sync::Arc;
-use std::str::FromStr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
+use std::result;
+use std::str::FromStr;
 use std::string::FromUtf8Error;
-use std::net::{IpAddr, Ipv6Addr, Ipv4Addr, SocketAddr};
+use std::sync::Arc;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about)]
@@ -50,8 +50,7 @@ async fn main() -> io::Result<()> {
         _ => Level::Info,
     };
 
-    simple_logger::init_with_level(level)
-        .expect("failed to init logger");
+    simple_logger::init_with_level(level).expect("failed to init logger");
 
     let mut users: Option<Vec<User>> = Option::default();
 
@@ -65,7 +64,11 @@ async fn main() -> io::Result<()> {
     let users = Arc::new(users);
     let listener = TcpListener::bind((opts.addr, opts.port)).await?;
 
-    log::info!("listening for incoming connections on {}:{}", opts.addr, opts.port);
+    log::info!(
+        "listening for incoming connections on {}:{}",
+        opts.addr,
+        opts.port
+    );
 
     loop {
         let (stream, addr) = listener.accept().await?;
@@ -78,13 +81,7 @@ async fn main() -> io::Result<()> {
 
             let res = handle(&mut stream, users).await;
             if let Err(Error::Command(err)) = res {
-                let buf = [
-                    SOCKS_VERSION,
-                    err as u8,
-                    0, 1,
-                    0, 0, 0, 0,
-                    0, 0
-                ];
+                let buf = [SOCKS_VERSION, err as u8, 0, 1, 0, 0, 0, 0, 0, 0];
 
                 stream.write(&buf).await?;
             };
@@ -145,7 +142,7 @@ enum CommandError {
 enum Method {
     NoAuth,
     Auth = 0x02,
-    NoAcceptable = 0xFF, 
+    NoAcceptable = 0xFF,
 }
 
 impl From<u8> for Method {
@@ -169,13 +166,13 @@ async fn handle(stream: &mut TcpStream, users: Arc<Option<Vec<User>>>) -> Result
     let mut buf = vec![0u8; buf[1] as usize];
     stream.read_exact(&mut buf).await?;
 
-    let method = Method::from(*buf
-        .iter()
-        .find(|&&m| {
-            m == Method::NoAuth as u8 && users.is_none() ||
-            m == Method::Auth as u8 && users.is_some()
-        })
-        .unwrap_or(&(Method::NoAcceptable as u8))
+    let method = Method::from(
+        *buf.iter()
+            .find(|&&m| {
+                m == Method::NoAuth as u8 && users.is_none()
+                    || m == Method::Auth as u8 && users.is_some()
+            })
+            .unwrap_or(&(Method::NoAcceptable as u8)),
     );
 
     let buf = [SOCKS_VERSION, method as u8];
@@ -205,10 +202,7 @@ async fn handle(stream: &mut TcpStream, users: Arc<Option<Vec<User>>>) -> Result
         if let Some(ref users) = *users {
             let exists = users
                 .iter()
-                .any(|u|
-                    u.username == username &&
-                    u.password == password
-                );
+                .any(|u| u.username == username && u.password == password);
 
             let buf = [AUTH_VERSION, !exists as u8];
             stream.write(&buf).await?;
@@ -244,9 +238,9 @@ async fn handle(stream: &mut TcpStream, users: Arc<Option<Vec<User>>>) -> Result
             let mut buf = vec![0u8; len as usize];
             stream.read_exact(&mut buf).await?;
 
-            let domain = String::from_utf8(buf)
-                .map_err(|_| Error::Command(CommandError::ServerFailure))?;
-                
+            let domain =
+                String::from_utf8(buf).map_err(|_| Error::Command(CommandError::ServerFailure))?;
+
             let port = stream.read_u16().await?;
 
             SocketAddr::from_str(&format!("{}:{}", domain, port))
@@ -262,16 +256,11 @@ async fn handle(stream: &mut TcpStream, users: Arc<Option<Vec<User>>>) -> Result
         _ => return Err(Error::Command(CommandError::UnsupportedAddr)),
     };
 
-    let mut peer = TcpStream::connect(dest).await
+    let mut peer = TcpStream::connect(dest)
+        .await
         .map_err(|_| Error::Command(CommandError::HostUnreachable))?;
 
-    let buf = [
-        SOCKS_VERSION,
-        SUCCESS_REPLY,
-        0, 1,
-        0, 0, 0, 0,
-        0, 0
-    ];
+    let buf = [SOCKS_VERSION, SUCCESS_REPLY, 0, 1, 0, 0, 0, 0, 0, 0];
 
     stream.write(&buf).await?;
 
